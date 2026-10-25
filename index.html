@@ -69,7 +69,7 @@ function cashTotals(){
  const foodLeft=c.mealSet?Math.max(0,num(c.mealReserve)-foodUsed):null;
  const otherLeft=Math.max(0,num(c.otherReserve)-otherUsed);
  const unassigned=state.spends.filter(x=>x.kind!=='refund'&&!x.paymentMethod&&!x.eventId).length;
- const known=c.cashKnown!==false;
+ const known=c.cashKnown===true||(c.cashKnown===undefined&&(c.reconciliations||[]).length>0);
  return {withdrawals,atmFees,cashFees:atmFees,unitemised:num(c.unitemised),expenseCash,refundCash,physicalBalance,balance,known,foodLeft,otherLeft,unassigned,shoppingLeft:!known||foodLeft===null?null:balance-foodLeft-otherLeft};
 }
 function cashWalletCard(){
