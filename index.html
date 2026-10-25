@@ -81,7 +81,7 @@ function cashWalletCard(){
  +(c.unassigned?'<div class="warning">'+c.unassigned+' previously recorded expenses have no Cash/Card method. Open Expense history and edit their payment method before relying on your cash balance.</div>':'')
  +'<div class="small muted">Cash already spent (unitemised): '+money(c.unitemised,'THB')+' · Other cash expenses logged: '+money(c.expenseCash,'THB')+' · ATM fees: '+money(c.atmFees,'THB')+' (separate cost)</div>'
  +'<div class="small muted">Other cash reserved: '+money(c.otherLeft,'THB')+'. Cash withdrawals are not expenses. Cash spent reduces the wallet; card-paid Grab or booked tours do not. Count your cash anytime to reconcile missed purchases.</div>'
- +'<div class="row wrap"><button class="btn sm primary" data-action="expense">+ Cash expense</button><button class="btn sm" data-action="cashWithdraw">+ Withdrawal</button><button class="btn sm" data-action="cashCount">Count my cash</button><button class="btn sm" data-action="cashHistory">Cash details</button></div></section>';
+ +'<div class="row wrap"><button class="btn sm primary" data-action="expense">+ Cash expense</button><button class="btn sm" data-action="cashWithdraw">+ Withdrawal</button><button class="btn sm" data-action="cashCount">Update cash / total spent</button><button class="btn sm" data-action="cashHistory">Cash details</button></div></section>';
 }
 function cashSetup(){
  if(cashData()){cashSettings();return}
@@ -117,22 +117,43 @@ function cashWithdrawModal(entry=null){
  ()=>{const a=Number(v('cwAmount')),f=Number(v('cwFee'));if(!Number.isFinite(a)||a<0||!Number.isFinite(f)||f<0||v('cwAmount')==='')throw Error('Enter non-negative amounts');const val={amount:a,fee:f,feeFromCash:$('cwFeeCash').checked};if(entry)Object.assign(entry,val);else c.withdrawals.push({id:id(),date:today(),...val});save();render();notify('Withdrawal saved')},'Save withdrawal');
 }
 
+
+function reconcileCash(method,raw){
+ const c=cashData();if(!c)throw Error('Set up cash wallet first');
+ const val=Number(raw);if(String(raw).trim()===''||!Number.isFinite(val)||val<0)throw Error('Enter a valid non-negative amount in baht.');
+ if(method!=='balance'&&method!=='spent')throw Error('Choose cash left or total spent.');
+ const t=cashTotals(),spendable=t.withdrawals-t.cashFees;
+ const balance=method==='balance'?val:spendable-val;
+ if(balance<0)throw Error('This would make the wallet negative. Check total withdrawals and ATM fees.');
+ const totalSpent=spendable-balance;
+ const unitemised=totalSpent-t.expenseCash;
+ if(unitemised<-.005)throw Error('Your separately logged cash expenses already exceed this spending total. Check or correct those expenses first.');
+ c.unitemised=Math.max(0,Math.round(unitemised*100)/100);
+ c.reconciliations??=[];
+ const record={id:id(),at:new Date().toISOString(),method,input:val,unitemised:c.unitemised,balance:Math.round(balance*100)/100,totalSpent:Math.round(totalSpent*100)/100};
+ const prev=c.reconciliations[c.reconciliations.length-1];
+ if(!prev||prev.balance!==record.balance||prev.totalSpent!==record.totalSpent)c.reconciliations.push(record);
+ save();render();notify('Cash updated: '+money(balance,'THB')+' left');
+ return record;
+}
 function cashCountModal(){
  const c=cashData();if(!c)return cashSetup();const t=cashTotals();
- modal('Count your cash','<p class="help">Count the Thai banknotes and coins you have right now. This reconciles small cash purchases you may have forgotten to record, without counting withdrawals as spending.</p>'
- +field('countedCash','Cash physically in your wallet (THB)',Math.max(0,Math.round(t.balance)),'number','min="0" step="1"')
- +'<p class="help">Already entered cash expenses will not be charged twice. Unrecorded purchases stay grouped as spending without a category. Adjust the meal reserve separately if that spending included meals.</p>',
- ()=>{const raw=v('countedCash'),amount=Number(raw);if(raw.trim()===''||!Number.isFinite(amount)||amount<0)throw Error('Enter the amount of cash counted');
- const u=t.withdrawals-t.cashFees-t.expenseCash-amount;
- if(u<0)throw Error('Your counted cash exceeds the tracked balance before unrecorded spending. Check withdrawals, recorded expenses and ATM fees.');
- c.unitemised=Math.round(u*100)/100;save();render();notify('Cash balance reconciled to '+money(amount,'THB'))},'Update cash balance');
+ const pastSpent=t.unitemised+t.expenseCash;
+ modal('Update your cash','<p class="help">No receipts or shop names needed. Enter whichever total you know. This replaces the cash estimate instead of adding another expense.</p>'
+ +select('cashUpdateMode','I know…',[['balance','How much cash I have left'],['spent','How much cash I have spent in total']],'balance')
+ +'<div id="cashBalanceWrap">'+field('cashLeftInput','Cash physically left now (THB)',Math.max(0,Math.round(t.balance)),'number','min="0" step="any"')+'</div>'
+ +'<div id="cashSpentWrap" style="display:none">'+field('cashSpentInput','Cash spent since the first withdrawal (THB)',Math.max(0,Math.round(pastSpent)),'number','min="0" step="any"')+'</div>'
+ +'<div class="mini small muted">Withdrawn '+money(t.withdrawals,'THB')+' · Already logged cash purchases '+money(t.expenseCash,'THB')+' · Cash-paid ATM fees '+money(t.cashFees,'THB')+'. Card-paid ATM fees are separate costs.</div>'
+ +'<p class="help">**Total spent** is cumulative, not spending since your previous update. Your recorded cash expenses are accounted for already, so the same purchase is never subtracted twice.</p>',
+ ()=>reconcileCash(v('cashUpdateMode'),v(v('cashUpdateMode')==='spent'?'cashSpentInput':'cashLeftInput')),'Update cash wallet');
+ $('cashUpdateMode').addEventListener('change',()=>{$('cashBalanceWrap').style.display=v('cashUpdateMode')==='balance'?'block':'none';$('cashSpentWrap').style.display=v('cashUpdateMode')==='spent'?'block':'none'});
 }
 
 function cashHistory(){
  const c=cashData();if(!c)return cashSetup();const t=cashTotals();
  modal('Cash wallet details','<div class="stack"><b>Withdrawals</b>'
  +(c.withdrawals||[]).map(w=>'<div class="mini row between"><span>'+money(w.amount,'THB')+' · fee '+money(w.fee,'THB')+(w.feeFromCash?' (from cash)':' (card)')+'</span><button class="btn sm" data-action="cashEditWithdrawal" data-id="'+w.id+'">Edit</button></div>').join('')
- +'<b>Where the cash went</b><div class="mini">Already spent but not itemised: '+money(t.unitemised,'THB')+'</div>'
+ +'<b>Cash updates (most recent first)</b>'+(c.reconciliations?.length?[...c.reconciliations].reverse().map(x=>'<div class="mini"><b>'+money(x.balance,'THB')+' left</b> · '+new Date(x.at).toLocaleString('en-GB')+'<div class="small muted">'+(x.method==='spent'?'Total spent entered: ':'Cash left entered: ')+money(x.input,'THB')+' · Total cash spent: '+money(x.totalSpent,'THB')+'</div></div>').join(''):'<p class="small muted">No cash updates yet. Count your cash or enter total spent to save a checkpoint.</p>')+'<b>Where the cash went</b><div class="mini">Already spent but not itemised: '+money(t.unitemised,'THB')+'</div>'
  +state.spends.filter(x=>x.paymentMethod==='cash').map(x=>'<div class="mini row between"><span>'+E(x.title)+' · '+E(x.category)+'</span><b>'+(x.kind==='refund'?'+':'−')+money(x.price,x.currency)+'</b></div>').join('')
  +'<p class="help">Cash withdrawals are transfers from your bank into your wallet. Only cash purchases and ATM fees count as holiday costs. The historical unitemised amount can be corrected in Edit cash plan.</p></div>',()=>{},'Close');
 }
